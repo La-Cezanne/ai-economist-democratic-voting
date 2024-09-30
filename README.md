@@ -1,5 +1,17 @@
 # Foundation: An Economic Simulation Framework
 
+> **Note from "*forker*" of this project**: I was disappointed to see such a nice project abandoned and deprecated after such a short time but was suprised to see that with a bit of work you could still utilize the framework (or at least the parts I used).
+>
+> I created this fork to showcase my results that I got from experimenting with this framework for a project paper for a module Multi-Agent Systems at RPTU Kaiserslautern-Landau, while studying the world-class (not yet but surely soon to be) renowned study course of Socioinformatics. Please pardon my lacking documentation and sometimes dirty work when it comes to visualizations and my extensions of the framework.
+> 
+> I focused on the one-step-economy scenario and created additional components for allowing the voting of mobile agents about tax schedules instead of the central planner. After requesting permission I would also like to add my finished project paper to this Repository.
+> 
+> To get the AI Economist Foundation framework running I installed the framework from source (see below) by creating a conda environment and making it an editable Python package. Some deprecations resulted where downgrading protobuf solved most issues but I still needed to do some manual bug fixing in the provided packages because of deprecations. I might add a small tutorial of the steps I did to get the framework working if I find the time. You might be able to reproduce this if you clone this repository after my first or second commit in this repo, since I also tried some modifications for a newer Ray and Python version.
+>
+> The results from my experiments can be reviewed in `analysis/new_analysis` with parts of the notebooks in `analysis` being utilized for my visualizations and interpretation of training results. I used the provided training script (`training_script.py`) and wrote a `generate_training_data_from_checkpoints.py` script to generate fitting training_data for analysis from my training runs.
+>
+> For this project my **many thanks go to the authors and contributors of the Foundation framework**. I really really appreciated the hard work you put into documentation and tutorials to use your framework. This helped me a lot and made exploring and experimenting with the framework quite fun. While I will probably not return to this project after submission **I do hope that my contributions to this project might help someone else with exploring this framework and contributing to academic research in a way as benefiting as the original authors seemed to have intended**. Please feel free to contact me about my attempts to get this framework running or my work (or about Socioinformatics in general)!
+
 This repo contains an implementation of Foundation, a framework for flexible, modular, and composable environments that **model socio-economic behaviors and dynamics in a society with both agents and governments**.
 
 Foundation provides a [Gym](https://gym.openai.com/)-style API:
