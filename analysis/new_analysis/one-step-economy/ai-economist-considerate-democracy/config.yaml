@@ -1,0 +1,116 @@
+agent_policy:
+  clip_param: 0.3
+  entropy_coeff: 0.2
+  entropy_coeff_schedule:
+  - - 0
+    - 0.3
+  - - 200000
+    - 0.1
+  gamma: 1.0
+  grad_clip: 10.0
+  kl_coeff: 0.0
+  kl_target: 0.01
+  lambda: 1.0
+  lr: 0.0001
+  lr_schedule: null
+  model:
+    custom_model: keras_linear
+    custom_options:
+      hidden_dim: 128
+      hidden_layers: 2
+      smoothing: 7
+    max_seq_len: 25
+  use_gae: true
+  vf_clip_param: 50.0
+  vf_loss_coeff: 0.05
+  vf_share_layers: false
+env:
+  agent_reward_type: coin_minus_labor_cost
+  components:
+  - SimpleLabor:
+      mask_first_step: true
+      pareto_param: 8
+      payment_max_skill_multiplier: 190
+  - DemocraticPeriodicBracketTax:
+      bracket_spacing: us-federal
+      disable_taxes: false
+      period: 2
+      rate_disc: 0.05
+      usd_scaling: 100
+  dense_log_frequency: 10000
+  labor_cost: 0.0005
+  utilitarian_weight: 0.5
+  episode_length: 2
+  flatten_masks: true
+  flatten_observations: true
+  isoelastic_eta: 0.5
+  labor_exponent: 3.5
+  multi_action_mode_agents: true
+  n_agents: 9
+  scenario_name: considerate-democratic-one-step-economy
+  world_size:
+  - 1
+  - 1
+general:
+  ckpt_frequency_steps: 25000
+  cpus: 1
+  episodes: 500000
+  gpus: 0
+  restore_tf_weights_agents: ''
+  restore_tf_weights_planner: ''
+  train_planner: true
+planner_policy:
+  clip_param: 0.3
+  entropy_coeff: 0.1
+  entropy_coeff_schedule:
+  - - 0
+    - 0.5
+  - - 200000
+    - 0.12
+  gamma: 1.0
+  grad_clip: 10.0
+  kl_coeff: 0.0
+  kl_target: 0.01
+  lambda: 1.0
+  lr: 3.0e-05
+  lr_schedule: null
+  model:
+    custom_model: keras_linear
+    custom_options:
+      hidden_dim: 128
+      hidden_layers: 2
+    max_seq_len: 25
+  use_gae: true
+  vf_clip_param: 50.0
+  vf_loss_coeff: 0.05
+  vf_share_layers: false
+trainer:
+  batch_mode: truncate_episodes
+  env_config: null
+  local_tf_session_args:
+    inter_op_parallelism_threads: 1
+    intra_op_parallelism_threads: 10
+  metrics_smoothing_episodes: null
+  multiagent: null
+  no_done_at_end: false
+  num_envs_per_worker: 1
+  num_gpus: 0
+  num_gpus_per_worker: 0
+  num_sgd_iter: 1
+  num_workers: 5
+  observation_filter: NoFilter
+  rollout_fragment_length: 2
+  seed: null
+  sgd_minibatch_size: 1000
+  shuffle_sequences: true
+  tf_session_args:
+    allow_soft_placement: true
+    device_count:
+      CPU: 1
+      GPU: 0
+    gpu_options:
+      allow_growth: true
+    inter_op_parallelism_threads: 1
+    intra_op_parallelism_threads: 10
+    log_device_placement: false
+  train_batch_size: 2000

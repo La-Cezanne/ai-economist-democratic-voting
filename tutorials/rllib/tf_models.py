@@ -9,8 +9,8 @@ import os
 import numpy as np
 from gym.spaces import Box, Dict
 from ray.rllib.models import ModelCatalog
-from ray.rllib.models.tf.recurrent_tf_modelv2 import (
-    RecurrentTFModelV2,
+from ray.rllib.models.tf.recurrent_net import (
+    RecurrentNetwork,
     add_time_dimension,
 )
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
@@ -54,7 +54,7 @@ def apply_logit_mask(logits, mask):
     return logits + logit_mask
 
 
-class KerasConvLSTM(RecurrentTFModelV2):
+class KerasConvLSTM(RecurrentNetwork):
     """
     The model used in the paper "The AI Economist: Optimal Economic Policy
     Design via Two-level Deep Reinforcement Learning"
@@ -69,13 +69,13 @@ class KerasConvLSTM(RecurrentTFModelV2):
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
         super().__init__(obs_space, action_space, num_outputs, model_config, name)
 
-        input_emb_vocab = self.model_config["custom_options"]["input_emb_vocab"]
-        emb_dim = self.model_config["custom_options"]["idx_emb_dim"]
-        num_conv = self.model_config["custom_options"]["num_conv"]
-        num_fc = self.model_config["custom_options"]["num_fc"]
-        fc_dim = self.model_config["custom_options"]["fc_dim"]
-        cell_size = self.model_config["custom_options"]["lstm_cell_size"]
-        generic_name = self.model_config["custom_options"].get("generic_name", None)
+        input_emb_vocab = self.model_config["custom_model_config"]["input_emb_vocab"]
+        emb_dim = self.model_config["custom_model_config"]["idx_emb_dim"]
+        num_conv = self.model_config["custom_model_config"]["num_conv"]
+        num_fc = self.model_config["custom_model_config"]["num_fc"]
+        fc_dim = self.model_config["custom_model_config"]["fc_dim"]
+        cell_size = self.model_config["custom_model_config"]["lstm_cell_size"]
+        generic_name = self.model_config["custom_model_config"].get("generic_name", None)
 
         self.cell_size = cell_size
 

@@ -913,6 +913,8 @@ class PeriodicBracketTax(BaseComponent):
         # Fold this period's tax data into the saez buffer.
         if self.tax_model == "saez":
             self._update_saez_buffer(tax_dict)
+            
+        # print(len(self.saez_buffer)) # Lasse
 
     # Required methods for implementing components
     # --------------------------------------------
@@ -1182,6 +1184,554 @@ class PeriodicBracketTax(BaseComponent):
             if self.tax_model == "saez":
                 # Include the running estimate of elasticity.
                 out["saez/estimated_elasticity"] = self.elas_tm1
+
+        return out
+
+    def get_dense_log(self):
+        """
+        Log taxes.
+
+        Returns:
+            taxes (list): A list of tax collections. Each entry corresponds to a single
+                timestep. Entries are empty except for timesteps where a tax period
+                ended and taxes were collected. For those timesteps, each entry
+                contains the tax schedule, each agent's reported income, tax paid,
+                and redistribution received.
+                Returns None if taxes are disabled.
+        """
+        if self.disable_taxes:
+            return None
+        return self.taxes
+
+@component_registry.add
+class DemocraticPeriodicBracketTax(BaseComponent):
+    """Periodically collect income taxes from agents and do lump-sum redistribution, but the agents decide about taxes instead of the planner
+
+    Note:
+        If this component is used, it should always be the last component in the order!
+
+    Args:
+        disable_taxes (bool): Whether to disable any tax collection, effectively
+            enforcing that tax rates are always 0. Useful for removing taxes without
+            changing the observation space. Default is False (taxes enabled).
+        period (int): Length of a tax period in environment timesteps. Taxes are
+            updated at the start of each period and collected/redistributed at the
+            end of each period. Must be > 0. Default is 100 timesteps.
+        rate_min (float): Minimum tax rate within a bracket. Must be >= 0 (default).
+        rate_max (float): Maximum tax rate within a bracket. Must be <= 1 (default).
+        rate_disc (float): the interval separating
+            discrete tax rates that the planner can select. Default of 0.05 means,
+            for example, the planner can select among [0.0, 0.05, 0.10, ... 1.0].
+            Must be > 0 and < 1.
+        n_brackets (int): How many tax brackets to use. Must be >=2. Default is 5.
+        top_bracket_cutoff (float): The income at the left end of the last tax
+            bracket. Must be >= 10. Default is 100 coin.
+        usd_scaling (float): Scale by which to divide the US Federal bracket cutoffs
+            when using bracket_spacing = "us-federal". Must be > 0. Default is 1000.
+        bracket_spacing (str): How bracket cutoffs should be spaced.
+            "us-federal" (default) uses scaled cutoffs from the 2018 US Federal
+                taxes, with scaling set by usd_scaling (ignores n_brackets and
+                top_bracket_cutoff);
+            "linear" linearly spaces the n_bracket cutoffs between 0 and
+                top_bracket_cutoff;
+            "log" is similar to "linear" but with logarithmic spacing.
+        fixed_bracket_rates (list): Required if tax_model=="fixed-bracket-rates". A
+            list of fixed marginal rates to use for each bracket. Length must be
+            equal to the number of brackets (7 for "us-federal" spacing, n_brackets
+            otherwise).
+    """
+
+    name = "DemocraticPeriodicBracketTax"
+    component_type = "PeriodicTax"
+    required_entities = ["Coin"]
+    agent_subclasses = ["BasicMobileAgent"]
+
+    def __init__(
+        self,
+        *base_component_args,
+        disable_taxes=False,
+        period=100,
+        rate_min=0.0,
+        rate_max=1.0,
+        rate_disc=0.05,
+        n_brackets=5,
+        top_bracket_cutoff=100,
+        usd_scaling=1000.0,
+        bracket_spacing="us-federal",
+        fixed_bracket_rates=None,
+        **base_component_kwargs
+    ):
+        super().__init__(*base_component_args, **base_component_kwargs)
+
+        # Whether to turn off taxes. Disabling taxes will prevent any taxes from
+        # being collected but the observation space will be the same as if taxes were
+        # enabled, which can be useful for controlled tax/no-tax comparisons.
+        self.disable_taxes = bool(disable_taxes)
+
+        # How many timesteps a tax period lasts.
+        self.period = int(period)
+        assert self.period > 0
+
+        # Minimum marginal bracket rate
+        self.rate_min = 0.0 if self.disable_taxes else float(rate_min)
+        # Maximum marginal bracket rate
+        self.rate_max = 0.0 if self.disable_taxes else float(rate_max)
+        assert 0 <= self.rate_min <= self.rate_max <= 1.0
+
+        # Interval for discretizing tax rate options
+        # (only applies if tax_model == "model_wrapper").
+        self.rate_disc = float(rate_disc)
+
+        self.disc_rates = np.arange(
+            self.rate_min, self.rate_max + self.rate_disc, self.rate_disc
+        )
+        self.disc_rates = self.disc_rates[self.disc_rates <= self.rate_max]
+        assert len(self.disc_rates) > 1 or self.disable_taxes
+        self.n_disc_rates = len(self.disc_rates)
+
+        # === income bracket definitions ===
+        self.n_brackets = int(n_brackets)
+        assert self.n_brackets >= 2
+
+        self.top_bracket_cutoff = float(top_bracket_cutoff)
+        assert self.top_bracket_cutoff >= 10
+
+        self.usd_scale = float(usd_scaling)
+        assert self.usd_scale > 0
+
+        self.bracket_spacing = bracket_spacing.lower()
+        assert self.bracket_spacing in ["linear", "log", "us-federal", "two-fold"]
+
+        if self.bracket_spacing == "linear":
+            self.bracket_cutoffs = np.linspace(
+                0, self.top_bracket_cutoff, self.n_brackets
+            )
+
+        elif self.bracket_spacing == "log":
+            b0_max = self.top_bracket_cutoff / (2 ** (self.n_brackets - 2))
+            self.bracket_cutoffs = np.concatenate(
+                [
+                    [0],
+                    2
+                    ** np.linspace(
+                        np.log2(b0_max),
+                        np.log2(self.top_bracket_cutoff),
+                        n_brackets - 1,
+                    ),
+                ]
+            )
+        elif self.bracket_spacing == "us-federal":
+            self.bracket_cutoffs = (
+                np.array([0, 9700, 39475, 84200, 160725, 204100, 510300])
+                / self.usd_scale
+            )
+            self.n_brackets = len(self.bracket_cutoffs)
+            self.top_bracket_cutoff = float(self.bracket_cutoffs[-1])
+            
+        elif self.bracket_spacing == 'two-fold':
+            self.bracket_cutoffs = (
+                np.array([0, 100000])
+                / self.usd_scale
+            )
+            self.n_brackets = len(self.bracket_cutoffs)
+            self.top_bracket_cutoff = float(self.bracket_cutoffs[-1])
+            
+        else:
+            raise NotImplementedError
+
+        self.bracket_edges = np.concatenate([self.bracket_cutoffs, [np.inf]])
+        self.bracket_sizes = self.bracket_edges[1:] - self.bracket_edges[:-1]
+
+        assert self.bracket_cutoffs[0] == 0
+
+        # === bracket tax rates ===
+        self.curr_bracket_tax_rates = np.zeros_like(self.bracket_cutoffs)
+        self.curr_rate_indices = [0 for _ in range(self.n_brackets)]
+
+        # Size of the local buffer. In a distributed context, the global buffer size
+        # will be capped at n_replicas * _buffer_size.
+        # NOTE: Saez will use random taxes until it has self._buffer_size samples.
+        self._buffer_size = 500
+        self._reached_min_samples = False
+        self._additions_this_episode = 0
+        # Local buffer maintained by this replica.
+        self._local_saez_buffer = []
+        # "Global" buffer obtained by combining local buffers of individual replicas.
+        self._global_saez_buffer = []
+
+        self.running_avg_tax_rates = np.zeros_like(self.curr_bracket_tax_rates)
+
+        # === tax cycle definitions ===
+        self.tax_cycle_pos = 1
+        self.last_coin = [0 for _ in range(self.n_agents)]
+        self.last_income = [0 for _ in range(self.n_agents)]
+        self.last_marginal_rate = [0 for _ in range(self.n_agents)]
+        self.last_effective_tax_rate = [0 for _ in range(self.n_agents)]
+
+        # === trackers ===
+        self.total_collected_taxes = 0
+        self.all_effective_tax_rates = []
+        self._schedules = {"{:03d}".format(int(r)): [0] for r in self.bracket_cutoffs}
+        self._occupancy = {"{:03d}".format(int(r)): 0 for r in self.bracket_cutoffs}
+        self.taxes = []
+
+
+        if not self.disable_taxes:
+            agent_action_tuples = self.get_n_actions("BasicMobileAgent") # TODO: Probably might need to change, dont really get what happens here
+            self._agent_tax_val_dict = {
+                k: self.disc_rates for k, v in agent_action_tuples
+            }
+        else:
+            self._agent_tax_val_dict = {}
+        self._agent_masks = None
+
+        # === placeholders ===
+        self._curr_rates_obs = np.array(self.curr_marginal_rates)
+        self._last_income_obs = np.array(self.last_income) / self.period
+        self._last_income_obs_sorted = self._last_income_obs[
+            np.argsort(self._last_income_obs)
+        ]
+
+    @property
+    def curr_marginal_rates(self):
+        """The current set of marginal tax bracket rates."""
+        return self.disc_rates[self.curr_rate_indices]
+    
+    # Methods for getting/setting marginal tax rates
+    # ----------------------------------------------
+    
+    def set_new_period_rates_model(self):
+        """Update taxes using actions from the tax model."""
+        if self.disable_taxes:
+            return
+
+        # AI version -> take the average of agents proposed tax rates
+        for i, bracket in enumerate(self.bracket_cutoffs):
+            bracket_proposals = []
+            for agent in self.world.agents:
+                agent_action = agent.get_component_action(
+                    self.name, "TaxIndexBracket_{:03d}".format(int(bracket))
+                )
+                if agent_action == 0:
+                    pass
+                elif agent_action <= self.n_disc_rates:
+                    bracket_proposals.append(int(agent_action-1))
+                else:
+                    raise ValueError
+            bracket_avg = np.average(bracket_proposals)
+            if agent_action == 0 or bracket_avg == 0:
+                pass
+            elif round(bracket_avg) <= self.n_disc_rates:
+                self.curr_rate_indices[i] = round(bracket_avg)
+            else:
+                raise ValueError
+
+    def bracketize_schedule(self, bin_marginal_rates, bin_edges, bin_sizes):
+        # Compute the amount of tax each bracket would collect
+        # if income was >= the right edge.
+        # Divide by the bracket size to get
+        # the average marginal rate within that bracket.
+        last_bracket_total = 0
+        bracket_avg_marginal_rates = []
+        for b_idx, income in enumerate(self.bracket_cutoffs[1:]):
+            # How much income occurs within each bin
+            # (including the open-ended, top "bin").
+            past_cutoff = np.maximum(0, income - bin_edges)
+            bin_income = np.minimum(bin_sizes, past_cutoff)
+
+            # To get the total taxes due,
+            # multiply the income within each bin by that bin's marginal rate.
+            bin_taxes = bin_marginal_rates * bin_income
+            taxes_due = np.maximum(0, np.sum(bin_taxes))
+
+            bracket_tax_burden = taxes_due - last_bracket_total
+            bracket_size = self.bracket_sizes[b_idx]
+
+            bracket_avg_marginal_rates.append(bracket_tax_burden / bracket_size)
+            last_bracket_total = taxes_due
+
+        # The top bracket tax rate is computed directly already.
+        bracket_avg_marginal_rates.append(bin_marginal_rates[-1])
+
+        bracket_rates = np.array(bracket_avg_marginal_rates)
+        assert len(bracket_rates) == self.n_brackets
+
+        return bracket_rates
+
+    # Methods for collecting and redistributing taxes
+    # -----------------------------------------------
+
+    def income_bin(self, income):
+        """Return index of tax bin in which income falls."""
+        if income < 0:
+            return 0.0
+        meets_min = income >= self.bracket_edges[:-1]
+        under_max = income < self.bracket_edges[1:]
+        bracket_bool = meets_min * under_max
+        return self.bracket_cutoffs[np.argmax(bracket_bool)]
+
+    def marginal_rate(self, income):
+        """Return the marginal tax rate applied at this income level."""
+        if income < 0:
+            return 0.0
+        meets_min = income >= self.bracket_edges[:-1]
+        under_max = income < self.bracket_edges[1:]
+        bracket_bool = meets_min * under_max
+        return self.curr_marginal_rates[np.argmax(bracket_bool)]
+
+    def taxes_due(self, income):
+        """Return the total amount of taxes due at this income level."""
+        past_cutoff = np.maximum(0, income - self.bracket_cutoffs)
+        bin_income = np.minimum(self.bracket_sizes, past_cutoff)
+        bin_taxes = self.curr_marginal_rates * bin_income
+        return np.sum(bin_taxes)
+
+    def enact_taxes(self):
+        """Calculate period income & tax burden. Collect taxes and redistribute."""
+        net_tax_revenue = 0
+        tax_dict = dict(
+            schedule=np.array(self.curr_marginal_rates),
+            cutoffs=np.array(self.bracket_cutoffs),
+        )
+
+        for curr_rate, bracket_cutoff in zip(
+            self.curr_marginal_rates, self.bracket_cutoffs
+        ):
+            self._schedules["{:03d}".format(int(bracket_cutoff))].append(
+                float(curr_rate)
+            )
+
+        self.last_income = []
+        self.last_effective_tax_rate = []
+        self.last_marginal_rate = []
+        for agent, last_coin in zip(self.world.agents, self.last_coin):
+            income = agent.total_endowment("Coin") - last_coin
+            tax_due = self.taxes_due(income)
+            effective_taxes = np.minimum(
+                agent.state["inventory"]["Coin"], tax_due
+            )  # Don't take from escrow.
+            marginal_rate = self.marginal_rate(income)
+            effective_tax_rate = float(effective_taxes / np.maximum(0.000001, income))
+            tax_dict[str(agent.idx)] = dict(
+                income=float(income),
+                tax_paid=float(effective_taxes),
+                marginal_rate=marginal_rate,
+                effective_rate=effective_tax_rate,
+            )
+
+            # Actually collect the taxes.
+            agent.state["inventory"]["Coin"] -= effective_taxes
+            net_tax_revenue += effective_taxes
+
+            self.last_income.append(float(income))
+            self.last_marginal_rate.append(float(marginal_rate))
+            self.last_effective_tax_rate.append(effective_tax_rate)
+
+            self.all_effective_tax_rates.append(effective_tax_rate)
+            self._occupancy["{:03d}".format(int(self.income_bin(income)))] += 1
+
+        self.total_collected_taxes += float(net_tax_revenue)
+
+        lump_sum = net_tax_revenue / self.n_agents
+        for agent in self.world.agents:
+            agent.state["inventory"]["Coin"] += lump_sum
+            tax_dict[str(agent.idx)]["lump_sum"] = float(lump_sum)
+            self.last_coin[agent.idx] = float(agent.total_endowment("Coin"))
+
+        self.taxes.append(tax_dict)
+
+        # Pre-compute some things that will be useful for generating observations.
+        self._last_income_obs = np.array(self.last_income) / self.period
+        self._last_income_obs_sorted = self._last_income_obs[
+            np.argsort(self._last_income_obs)
+        ]
+
+    # Required methods for implementing components
+    # --------------------------------------------
+
+    def get_n_actions(self, agent_cls_name):
+        """
+        See base_component.py for detailed description.
+        """
+        # Only the agent takes actions through this component.
+        if agent_cls_name == "BasicMobileAgent":
+            if not self.disable_taxes:
+                # For every bracket, the planner can select one of the discretized
+                # tax rates.
+                return [
+                    ("TaxIndexBracket_{:03d}".format(int(r)), self.n_disc_rates)
+                    for r in self.bracket_cutoffs
+                ]
+
+        # Return 0 (no added actions) if the other conditions aren't met.
+        return 0
+
+    def get_additional_state_fields(self, agent_cls_name):
+        """This component does not add any agent state fields."""
+        return {}
+
+    def component_step(self):
+        """
+        See base_component.py for detailed description.
+
+        On the first day of each tax period, update taxes. On the last day, enact them.
+        """
+
+        # 1. On the first day of a new tax period: Set up the taxes for this period.
+        if self.tax_cycle_pos == 1:
+            self.set_new_period_rates_model()
+
+            self._curr_rates_obs = np.array(self.curr_marginal_rates)
+
+        # 2. On the last day of the tax period: Get $-taxes AND update agent endowments.
+        if self.tax_cycle_pos >= self.period:
+            self.enact_taxes()
+            self.tax_cycle_pos = 0
+
+        else:
+            self.taxes.append([])
+
+        # increment timestep.
+        self.tax_cycle_pos += 1
+
+    def generate_observations(self):
+        """
+        See base_component.py for detailed description.
+
+        Agents observe where in the tax period cycle they are, information about the
+        last period's incomes, and the current marginal tax rates, including the
+        marginal rate that will apply to their next unit of income.
+        """
+        is_tax_day = float(self.tax_cycle_pos >= self.period)
+        is_first_day = float(self.tax_cycle_pos == 1)
+        tax_phase = self.tax_cycle_pos / self.period
+
+        obs = dict()
+
+        for agent in self.world.agents:
+            i = agent.idx
+            k = str(i)
+
+            curr_marginal_rate = self.marginal_rate(
+                agent.total_endowment("Coin") - self.last_coin[i]
+            )
+
+            obs[k] = dict(
+                is_tax_day=is_tax_day,
+                is_first_day=is_first_day,
+                tax_phase=tax_phase,
+                last_incomes=self._last_income_obs_sorted,
+                curr_rates=self._curr_rates_obs,
+                marginal_rate=curr_marginal_rate,
+            )
+
+        return obs
+
+    def generate_masks(self, completions=0):
+        """
+        See base_component.py for detailed description.
+
+        All tax actions are masked (so, only NO-OPs can be sampled) on all timesteps
+        except when self.tax_cycle_pos==1 (meaning a new tax period is starting).
+        """
+
+        if self.disable_taxes:
+            return {}
+
+        if self._agent_masks is None:
+            masks = super().generate_masks(completions=completions)
+            self._agent_masks = dict(
+                new_taxes=deepcopy(masks[self.world.agents[0].idx]),
+                zeros={
+                    k: np.zeros_like(v)
+                    for k, v in masks[self.world.agents[0].idx].items()
+                },
+            )
+
+        # No need to recompute. Use the cached masks.
+        masks = dict()
+        for agent in self.world.agents:
+            if self.tax_cycle_pos != 1 or self.disable_taxes:
+                # Apply zero masks for any timestep where taxes
+                # are not going to be updated.
+                masks[agent.idx] = self._agent_masks["zeros"]
+            else:
+                masks[agent.idx] = self._agent_masks["new_taxes"]
+
+        return masks
+
+    # For non-required customization
+    # ------------------------------
+
+    def additional_reset_steps(self):
+        """
+        See base_component.py for detailed description.
+
+        Reset trackers.
+        """
+        self.curr_rate_indices = [0 for _ in range(self.n_brackets)]
+
+        self.tax_cycle_pos = 1
+        self.last_coin = [
+            float(agent.total_endowment("Coin")) for agent in self.world.agents
+        ]
+        self.last_income = [0 for _ in range(self.n_agents)]
+        self.last_marginal_rate = [0 for _ in range(self.n_agents)]
+        self.last_effective_tax_rate = [0 for _ in range(self.n_agents)]
+
+        self._curr_rates_obs = np.array(self.curr_marginal_rates)
+        self._last_income_obs = np.array(self.last_income) / self.period
+        self._last_income_obs_sorted = self._last_income_obs[
+            np.argsort(self._last_income_obs)
+        ]
+
+        self.taxes = []
+        self.total_collected_taxes = 0
+        self.all_effective_tax_rates = []
+        self._schedules = {"{:03d}".format(int(r)): [] for r in self.bracket_cutoffs}
+        self._occupancy = {"{:03d}".format(int(r)): 0 for r in self.bracket_cutoffs}
+        self._agent_masks = None
+
+    def get_metrics(self):
+        """
+        See base_component.py for detailed description.
+
+        Return metrics related to bracket rates, bracket occupancy, and tax collection.
+        """
+        out = dict()
+
+        n_observed_incomes = np.maximum(1, np.sum(list(self._occupancy.values())))
+        for c in self.bracket_cutoffs:
+            k = "{:03d}".format(int(c))
+            out["avg_bracket_rate/{}".format(k)] = np.mean(self._schedules[k])
+            out["bracket_occupancy/{}".format(k)] = (
+                self._occupancy[k] / n_observed_incomes
+            )
+
+        if not self.disable_taxes:
+            out["avg_effective_tax_rate"] = np.mean(self.all_effective_tax_rates)
+            out["total_collected_taxes"] = float(self.total_collected_taxes)
+
+            # Indices of richest and poorest agents.
+            agent_coin_endows = np.array(
+                [agent.total_endowment("Coin") for agent in self.world.agents]
+            )
+            idx_poor = np.argmin(agent_coin_endows)
+            idx_rich = np.argmax(agent_coin_endows)
+
+            tax_days = self.taxes[(self.period - 1) :: self.period]
+            for i, tag in zip([idx_poor, idx_rich], ["poorest", "richest"]):
+                total_income = np.maximum(
+                    0, [tax_day[str(i)]["income"] for tax_day in tax_days]
+                ).sum()
+                total_tax_paid = np.sum(
+                    [tax_day[str(i)]["tax_paid"] for tax_day in tax_days]
+                )
+                # Report the overall tax rate over the episode
+                # for the richest and poorest agents.
+                out["avg_tax_rate/{}".format(tag)] = total_tax_paid / np.maximum(
+                    0.001, total_income
+                )
 
         return out
 
