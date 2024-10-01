@@ -33,7 +33,8 @@ except ValueError:
     print("No GPUs found! Running the simulation on a CPU.")
 
 import numpy as np
-from gym.spaces import Box, Dict, Discrete, MultiDiscrete
+
+from gymnasium.spaces import Box, Dict, Discrete, MultiDiscrete
 
 BIG_NUMBER = 1e20
 
@@ -336,7 +337,7 @@ class FoundationEnvWrapper:
                 self.cuda_data_manager, mode="force_reset"
             )
             return {}
-        return obs  # CPU version
+        return obs, {}  # CPU version -> added empty info dict
 
     def reset_only_done_envs(self):
         """
@@ -373,7 +374,8 @@ class FoundationEnvWrapper:
             obs, rew, done, info = self.env.step(actions)
             obs = self._reformat_obs(obs)
             rew = self._reformat_rew(rew)
-            result = obs, rew, done, info
+            truncated = {'__all__': False} # TODO: might need to add functionality here if episode actually ended prematurely
+            result = obs, rew, done, truncated, info
         return result
 
     def obs_at_reset(self):
@@ -405,7 +407,7 @@ class FoundationEnvWrapper:
             del rew["a"]  # remove the key "a"
         return rew
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         """
         Alias for reset_all_envs() when CPU is used (conforms to gym-style)
         """

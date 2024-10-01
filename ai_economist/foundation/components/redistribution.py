@@ -1419,7 +1419,7 @@ class DemocraticPeriodicBracketTax(BaseComponent):
                 else:
                     raise ValueError
             bracket_avg = np.average(bracket_proposals)
-            if agent_action == 0 or bracket_avg == 0:
+            if np.isnan(bracket_avg):
                 pass
             elif round(bracket_avg) <= self.n_disc_rates:
                 self.curr_rate_indices[i] = round(bracket_avg)

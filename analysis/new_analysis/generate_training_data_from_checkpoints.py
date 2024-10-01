@@ -19,7 +19,7 @@ model_name = 'con-dem-aie-00' # TODO 'saez' or 'aie' or 'ego-dem-aie' or 'con-de
 
 model_desc = 'Considerate-Democratic AI Economist 00' # TODO 'Saez Formula' or 'AI Economist' or 'Ego-Democratic AI Economist' or 'Considerate-Democratic AI Economist 50' (or similar -> need to add plot_cols)
 
-multiple_runs = 10 # TODO if more than 1 test-run per checkpoint is required
+multiple_runs = 100 # TODO if more than 1 test-run per checkpoint is required
 
 config_path = os.path.join(path_to_data, 'config.yaml') # path to config.yaml
 

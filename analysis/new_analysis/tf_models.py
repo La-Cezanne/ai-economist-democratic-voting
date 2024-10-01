@@ -7,19 +7,19 @@
 import os
 
 import numpy as np
-from gym.spaces import Box, Dict
+from gymnasium.spaces import Box, Dict
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.tf.recurrent_net import (
     RecurrentNetwork,
     add_time_dimension,
 )
 from ray.rllib.models.tf.tf_modelv2 import TFModelV2
-from ray.rllib.utils import try_import_tf
+from ray.rllib.utils.framework import try_import_tf
 from tensorflow import keras
 
 # Disable TF INFO, WARNING, and ERROR messages
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-tf = try_import_tf()
+# os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+_, tf, _ = try_import_tf()
 
 _WORLD_MAP_NAME = "world-map"
 _WORLD_IDX_MAP_NAME = "world-idx_map"
@@ -368,7 +368,7 @@ class KerasLinear(TFModelV2):
             )(self.inputs[0])
 
         self.base_model = tf.keras.Model(self.inputs, [logits, values])
-        self.register_variables(self.base_model.variables)
+        # self.register_variables(self.base_model.variables)
 
     def forward(self, input_dict, state, seq_lens):
         model_out, self._value_out = self.base_model(
@@ -417,7 +417,7 @@ class RandomAction(TFModelV2):
         masked_logits = apply_logit_mask(unmasked_logits, mask_input)
 
         self.base_model = keras.Model(self.inputs, [masked_logits, values])
-        self.register_variables(self.base_model.variables)
+        # self.register_variables(self.base_model.variables)
 
         # This will be set in the forward() call below
         self.values = None

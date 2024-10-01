@@ -15,7 +15,7 @@ from utils import remote, saving
 import tf_models
 import yaml
 from env_wrapper import RLlibEnvWrapper
-from ray.rllib.agents.ppo import PPOTrainer
+from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.tune.logger import NoopLogger, pretty_print
 
 ray.init(log_to_driver=False)
@@ -86,7 +86,7 @@ def build_trainer(run_configuration):
 
     policies = {"a": agent_policy_tuple, "p": planner_policy_tuple}
 
-    def policy_mapping_fun(i):
+    def policy_mapping_fun(i, episode, worker):
         if str(i).isdigit() or i == "a":
             return "a"
         return "p"
@@ -115,9 +115,11 @@ def build_trainer(run_configuration):
     def logger_creator(config):
         return NoopLogger({}, "/tmp")
 
-    ppo_trainer = PPOTrainer(
-        env=RLlibEnvWrapper, config=trainer_config, logger_creator=logger_creator
-    )
+    ppo_trainer = PPOConfig.from_dict(config_dict=trainer_config).environment(RLlibEnvWrapper).build()
+    
+    # PPO(
+    #     env=RLlibEnvWrapper, config=trainer_config, logger_creator=logger_creator
+    # )
 
     return ppo_trainer
 

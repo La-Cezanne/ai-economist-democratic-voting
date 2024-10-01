@@ -16,8 +16,8 @@ import warnings
 
 import numpy as np
 from ai_economist import foundation
-from gym import spaces
-from gym.utils import seeding
+from gymnasium import spaces
+from gymnasium.utils import seeding
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 _BIG_NUMBER = 1e20
@@ -200,12 +200,14 @@ class RLlibEnvWrapper(MultiAgentEnv):
         random.seed(seed2)
         self._seed = seed2
 
-    def reset(self, *args, **kwargs):
+    def reset(self, *args,  seed=None, options=None, **kwargs):
         obs = self.env.reset(*args, **kwargs)
-        return recursive_list_to_np_array(obs)
+        return recursive_list_to_np_array(obs), {}  #  added empty info dict
 
     def step(self, action_dict):
-        obs, rew, done, info = self.env.step(action_dict)
+        obs, rew, terminated, info = self.env.step(action_dict)
         assert isinstance(obs[self.sample_agent_idx]["action_mask"], np.ndarray)
+        
+        truncated = {'__all__': False} # TODO: might need to add functionality here if episode actually ended prematurely
 
-        return recursive_list_to_np_array(obs), rew, done, info
+        return recursive_list_to_np_array(obs), rew, terminated, truncated, info

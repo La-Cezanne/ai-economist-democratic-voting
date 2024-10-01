@@ -35,6 +35,8 @@ class SimpleLabor(BaseComponent):
             select labor (via this component).
         payment_max_skill_multiplier (float): When determining the skill level of
             each Agent, sampled skills are clipped to this maximum value.
+        num_labor_hours (int): This defines the size of the action space 
+            (the max # hours an agent can work)
     """
 
     name = "SimpleLabor"
@@ -47,12 +49,13 @@ class SimpleLabor(BaseComponent):
         mask_first_step=True,
         payment_max_skill_multiplier=3,
         pareto_param=4.0,
+        num_labor_hours=100,
         **base_component_kwargs
     ):
         super().__init__(*base_component_args, **base_component_kwargs)
 
         # This defines the size of the action space (the max # hours an agent can work).
-        self.num_labor_hours = 100  # max 100 hours
+        self.num_labor_hours = num_labor_hours  # default 100 hours
 
         assert isinstance(mask_first_step, bool)
         self.mask_first_step = mask_first_step
